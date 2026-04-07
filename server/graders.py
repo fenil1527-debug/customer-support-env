@@ -62,12 +62,8 @@ GRADERS = {
     "technical_grader": technical_grader,
 }
 
-
-def grade_task(task_id: str, response: str, task: dict) -> float:
-    grader_name = task.get("grader")
-    grader_fn = GRADERS.get(grader_name)
-
+def grade_task(response: str, task: dict) -> float:
+    grader_fn = GRADERS.get(task.get("grader"))
     if grader_fn is None:
         return 0.25
-
     return _clamp_strict(grader_fn(response, task))
