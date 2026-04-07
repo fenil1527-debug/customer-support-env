@@ -1,5 +1,10 @@
 def _clamp_strict(score: float) -> float:
-    return round(max(0.01, min(float(score), 0.99)), 2)
+    score = float(score)
+    if score <= 0:
+        score = 0.01
+    elif score >= 1:
+        score = 0.99
+    return round(score, 2)
 
 
 def delivery_grader(response: str, task: dict) -> float:
@@ -62,8 +67,14 @@ GRADERS = {
     "technical_grader": technical_grader,
 }
 
+
 def grade_task(response: str, task: dict) -> float:
-    grader_fn = GRADERS.get(task.get("grader"))
+    grader_name = task.get("grader")
+    grader_fn = GRADERS.get(grader_name)
+
+    print(f"[GRADER] Using {grader_name}", flush=True)
+
     if grader_fn is None:
-        return 0.25
-    return _clamp_strict(grader_fn(response, task))
+        return 0.25  # safe fallback (still valid range)
+
+    return grader_fn(response, task)  # ⚠️ NO DOUBLE CLAMP
