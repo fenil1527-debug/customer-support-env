@@ -31,6 +31,5 @@ TASKS = [
     },
 ]
 
-
 def get_task():
     return deepcopy(random.choice(TASKS))
