@@ -1,12 +1,14 @@
 name: customer-support-env
 description: Customer support simulation environment
+
+entrypoint:
+  module: server.app
+  callable: app
+
 tasks:
-  - id: delivery_issue
-    description: Handle a customer complaint about a delayed or missing delivery
-    grader: delivery_grader
-  - id: refund_issue
-    description: Handle a customer request for a refund on a damaged product
-    grader: refund_grader
-  - id: technical_issue
-    description: Handle a customer report of an app crashing or technical problem
-    grader: technical_grader
+  module: server.tasks
+  callable: TASKS
+
+graders:
+  module: server.graders
+  callable: GRADERS
