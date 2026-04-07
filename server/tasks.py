@@ -1,5 +1,4 @@
 from copy import deepcopy
-import random
 
 TASKS = [
     {
@@ -31,5 +30,10 @@ TASKS = [
     },
 ]
 
+_task_index = 0
+
 def get_task():
-    return deepcopy(random.choice(TASKS))
+    global _task_index
+    task = TASKS[_task_index % len(TASKS)]
+    _task_index += 1
+    return deepcopy(task)
