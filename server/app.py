@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from copy import deepcopy
 
 from server.tasks import get_task
 from server.graders import grade_task
@@ -47,7 +46,7 @@ class Env:
         self.step_count += 1
         response = action["response"]
 
-        score = grade_task(self.task["id"], response, self.task)
+        score = grade_task(response, self.task)
 
         self.history.append(
             {
@@ -64,7 +63,7 @@ class Env:
         return {
             "observation": {
                 "user_query": self.task["query"],
-                "conversation_history": deepcopy(self.history),
+                "conversation_history": self.history,
                 "step": self.step_count,
                 "priority": self.task["priority"],
                 "intent": self.task["intent"],
