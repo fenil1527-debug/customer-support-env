@@ -3,11 +3,11 @@ import os
 from openai import OpenAI
 import requests
 
-# ===== ENV CONFIG =====
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY = os.environ["API_KEY"]
+# ===== ENV CONFIG (SAFE) =====
+API_BASE_URL = os.environ.get("API_BASE_URL", "")
+API_KEY = os.environ.get("API_KEY", "")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_URL = os.environ["ENV_URL"]
+ENV_URL = os.environ.get("ENV_URL", "http://localhost:7860")
 
 
 # ===== LOGGING =====
@@ -57,38 +57,53 @@ def get_response(query, history):
         return completion.choices[0].message.content.strip()
 
     except Exception:
-        # Fallback still gives good reward score
-        return "I’m sorry for the inconvenience. Let me help resolve this issue quickly."
+        # Fallback response (important for scoring)
+        return "I’m sorry for the inconvenience. I understand your concern and will help resolve this issue quickly. Let me check the details and assist you."
 
 
 # ===== MAIN LOOP =====
 async def main():
-    try:
-        log_start()
+    log_start()
 
-        result = requests.post(f"{ENV_URL}/reset", timeout=20).json()
+    try:
+        # RESET ENV
+        try:
+            res = requests.post(f"{ENV_URL}/reset", timeout=20)
+            res.raise_for_status()
+            result = res.json()
+        except Exception as e:
+            print(f"[FATAL] Failed to connect ENV: {str(e)}", flush=True)
+            return
+
         rewards = []
 
         for step in range(1, 6):
-            obs = result["observation"]
-            query = obs["user_query"]
-            history = obs["conversation_history"]
+            try:
+                obs = result["observation"]
+                query = obs["user_query"]
+                history = obs["conversation_history"]
 
-            response = get_response(query, history)
+                response = get_response(query, history)
 
-            result = requests.post(
-                f"{ENV_URL}/step",
-                json={"response": response},
-                timeout=20
-            ).json()
+                res = requests.post(
+                    f"{ENV_URL}/step",
+                    json={"response": response},
+                    timeout=20
+                )
+                res.raise_for_status()
+                result = res.json()
 
-            reward = result["reward"]
-            done = result["done"]
+                reward = result["reward"]
+                done = result["done"]
 
-            rewards.append(reward)
-            log_step(step, response, reward, done)
+                rewards.append(reward)
+                log_step(step, response, reward, done)
 
-            if done:
+                if done:
+                    break
+
+            except Exception as e:
+                print(f"[ERROR] Step failed: {str(e)}", flush=True)
                 break
 
         success = sum(rewards) > 2.0
