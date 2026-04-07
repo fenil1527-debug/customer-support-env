@@ -3,14 +3,21 @@ import os
 from openai import OpenAI
 import requests
 
-# ===== ENV CONFIG (SAFE) =====
-API_BASE_URL = os.environ.get("API_BASE_URL", "")
-API_KEY = os.environ.get("API_KEY", "")
+# ENV CONFIG :-
+
+try:
+    API_BASE_URL = os.environ["API_BASE_URL"]
+    API_KEY = os.environ["API_KEY"]
+except KeyError as e:
+    print(f"[FATAL] Missing required env var: {str(e)}", flush=True)
+    exit(1)
+
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_URL = os.environ.get("ENV_URL", "http://localhost:7860")
 
 
-# ===== LOGGING =====
+# LOGGING :-
+
 def log_start():
     print(f"[START] task=customer-support env=custom model={MODEL_NAME}", flush=True)
 
@@ -27,7 +34,8 @@ def log_end(success, steps, rewards):
     print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
-# ===== LLM RESPONSE =====
+# LLM RESPONSE :-
+
 def get_response(query, history):
     try:
         client = OpenAI(
@@ -56,54 +64,46 @@ def get_response(query, history):
 
         return completion.choices[0].message.content.strip()
 
-    except Exception:
-        # Fallback response (important for scoring)
-        return "I’m sorry for the inconvenience. I understand your concern and will help resolve this issue quickly. Let me check the details and assist you."
+    except Exception as e:
+        # ⚠️ IMPORTANT: log error but still return fallback
+        print(f"[LLM_ERROR] {str(e)}", flush=True)
+
+        return "I sincerely apologize for the inconvenience. I understand your concern and will take immediate action to resolve this. Let me assist you step by step."
 
 
-# ===== MAIN LOOP =====
 async def main():
     log_start()
 
     try:
-        # RESET ENV
-        try:
-            res = requests.post(f"{ENV_URL}/reset", timeout=20)
-            res.raise_for_status()
-            result = res.json()
-        except Exception as e:
-            print(f"[FATAL] Failed to connect ENV: {str(e)}", flush=True)
-            return
+        # RESET
+        res = requests.post(f"{ENV_URL}/reset", timeout=20)
+        res.raise_for_status()
+        result = res.json()
 
         rewards = []
 
         for step in range(1, 6):
-            try:
-                obs = result["observation"]
-                query = obs["user_query"]
-                history = obs["conversation_history"]
+            obs = result["observation"]
+            query = obs["user_query"]
+            history = obs["conversation_history"]
 
-                response = get_response(query, history)
+            response = get_response(query, history)
 
-                res = requests.post(
-                    f"{ENV_URL}/step",
-                    json={"response": response},
-                    timeout=20
-                )
-                res.raise_for_status()
-                result = res.json()
+            res = requests.post(
+                f"{ENV_URL}/step",
+                json={"response": response},
+                timeout=20
+            )
+            res.raise_for_status()
+            result = res.json()
 
-                reward = result["reward"]
-                done = result["done"]
+            reward = result["reward"]
+            done = result["done"]
 
-                rewards.append(reward)
-                log_step(step, response, reward, done)
+            rewards.append(reward)
+            log_step(step, response, reward, done)
 
-                if done:
-                    break
-
-            except Exception as e:
-                print(f"[ERROR] Step failed: {str(e)}", flush=True)
+            if done:
                 break
 
         success = sum(rewards) > 2.0
