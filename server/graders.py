@@ -75,6 +75,6 @@ def grade_task(response: str, task: dict) -> float:
     print(f"[GRADER] Using {grader_name}", flush=True)
 
     if grader_fn is None:
-        return 0.25  # safe fallback (still valid range)
+        return 0.25 
 
-    return grader_fn(response, task)  # ⚠️ NO DOUBLE CLAMP
+    return grader_fn(response, task)
