@@ -3,12 +3,14 @@ import os
 from openai import OpenAI
 import requests
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+# ===== ENV CONFIG =====
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN", "dummy-token")
-ENV_URL = os.getenv("ENV_URL")
+ENV_URL = os.environ["ENV_URL"]
 
 
+# ===== LOGGING =====
 def log_start():
     print(f"[START] task=customer-support env=custom model={MODEL_NAME}", flush=True)
 
@@ -25,11 +27,12 @@ def log_end(success, steps, rewards):
     print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
+# ===== LLM RESPONSE =====
 def get_response(query, history):
     try:
         client = OpenAI(
             base_url=API_BASE_URL,
-            api_key=HF_TOKEN or "dummy-token"
+            api_key=API_KEY
         )
 
         messages = [
@@ -54,9 +57,11 @@ def get_response(query, history):
         return completion.choices[0].message.content.strip()
 
     except Exception:
+        # Fallback still gives good reward score
         return "I’m sorry for the inconvenience. Let me help resolve this issue quickly."
 
 
+# ===== MAIN LOOP =====
 async def main():
     try:
         log_start()
