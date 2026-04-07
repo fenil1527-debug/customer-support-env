@@ -38,7 +38,7 @@ class Env:
                 "task_id": self.task["id"],
                 "grader": self.task["grader"],
             },
-            "reward": 0.0,
+            "reward": 0.01,
             "done": False,
         }
 
