@@ -1,7 +1,38 @@
 from fastapi import FastAPI
 
-from models import Action, Observation, State, StepResult
-# `HistoryItem` is inside `models`, `Observation` and `StepResult` handle their usage.
+from pydantic import BaseModel
+from typing import List, Optional, Any, Dict
+
+class HistoryItem(BaseModel):
+    user: str
+    agent: str
+
+class Observation(BaseModel):
+    user_query: str
+    conversation_history: List[HistoryItem]
+    step: int
+    system_response: Optional[str] = None
+    priority: str
+    intent: str
+    task_id: str
+    grader: str
+
+class Action(BaseModel):
+    action_type: str = "message_user"
+    target: Optional[str] = None
+    response: str
+
+
+class State(BaseModel):
+    step: int
+    intent: Optional[str] = None
+    task_id: Optional[str] = None
+
+class StepResult(BaseModel):
+    observation: Observation
+    reward: float
+    done: bool
+    info: Dict[str, Any] = {}
 
 from server.tasks import get_task
 from server.graders import grade_task
@@ -26,6 +57,7 @@ class Env:
                 user_query=self.task["query"],
                 conversation_history=[],
                 step=0,
+                system_response=None,
                 priority=self.task["priority"],
                 intent=self.task["intent"],
                 task_id=self.task["id"],
@@ -37,27 +69,49 @@ class Env:
 
     def step(self, action):
         self.step_count += 1
-        response = action["response"]
+        act_type = action.get("action_type", "message_user")
+        target = action.get("target")
+        response = action.get("response", "")
 
-        score = grade_task(response, self.task)
+        system_response = None
+        reward = 0.0
 
-        self.history.append(
-            {
-                "user": self.task["query"],
-                "agent": response,
-            }
-        )
+        if act_type == "lookup_order":
+            if target and target in self.task.get("system_db", {}):
+                system_response = f"Order {target} found: {self.task['system_db'][target]}"
+            else:
+                system_response = f"Order {target} not found."
+                
+        elif act_type == "process_refund":
+            if target and target in self.task.get("system_db", {}):
+                system_response = f"Refund processed for {target}."
+            else:
+                system_response = f"Cannot process refund for {target}."
+                
+        elif act_type == "lookup_kb":
+            if target and target in self.task.get("system_db", {}):
+                system_response = f"KB Entry: {self.task['system_db'][target]}"
+            else:
+                system_response = f"No KB entry found for {target}."
 
-        if self.step_count > 1:
-            self.task["query"] = "User is still waiting. Please provide a better resolution."
+        self.history.append({
+            "user": self.task["query"],
+            "agent": f"[{act_type}] {response}"
+        })
+
+        score = grade_task(self.history, self.task)
+
+        if act_type == "message_user":
+            self.task["query"] = "I have received your message. Please confirm the resolution."
 
         done = self.step_count >= self.max_steps or score > 0.85
 
         return StepResult(
             observation=Observation(
                 user_query=self.task["query"],
-                conversation_history=self.history,  # Wait, wait. Is dict to HistoryItem validated automatically by Pydantic? Let me ensure it's explicitly typed. Let me do self.history where elements are HistoryItems. I will change self.history to contain dicts, FastAPI and Pydantic will auto cast dicts into HistoryItem in the response serialization.
+                conversation_history=self.history,
                 step=self.step_count,
+                system_response=system_response,
                 priority=self.task["priority"],
                 intent=self.task["intent"],
                 task_id=self.task["id"],
