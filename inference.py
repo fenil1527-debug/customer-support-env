@@ -30,8 +30,23 @@ _REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from models import Action, Observation, State, StepResult
+from pydantic import BaseModel
 
+class HistoryItem(BaseModel):
+    user: str
+    agent: str
+
+class Observation(BaseModel):
+    user_query: str
+    conversation_history: List[HistoryItem]
+    step: int
+    priority: str
+    intent: str
+    task_id: str
+    grader: str
+
+class Action(BaseModel):
+    response: str
 
 # ---------------------------------------------------------------------------
 # Configuration
