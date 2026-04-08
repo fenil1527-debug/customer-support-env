@@ -74,7 +74,31 @@ def _build_client():
     from openai import OpenAI
     key = API_KEY or "no-key-set"
     logger.info("Initializing OpenAI client. Base: %s, Key set: %s", API_BASE_URL, bool(API_KEY))
-    return OpenAI(base_url=API_BASE_URL, api_key=key)
+    try:
+        # Strictly try instantiating the client
+        return OpenAI(base_url=API_BASE_URL, api_key=key)
+    except Exception as e:
+        logger.warning(f"OpenAI package instantiation crashed: {e}. Falling back to pure HTTP proxy bypass.")
+        return "USE_HTTP"
+
+def _http_llm_call(messages: List[Dict[str, str]]) -> str:
+    # Safely bypass openai library internally and hit proxy natively
+    url = f"{API_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {API_KEY or 'dummy'}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "max_tokens": MAX_TOKENS,
+        "temperature": TEMPERATURE,
+    }
+    req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+        return body["choices"][0]["message"]["content"]
+
 
 def _heuristic_action(obs: Observation) -> Action:
     if obs.intent == "delivery": return Action(response="I am deeply sorry for the delay regarding your tracking. Let me process this immediately.")
@@ -103,13 +127,18 @@ def get_action(client, obs: Observation, use_llm: bool = True) -> Action:
 
     for attempt in range(MAX_RETRIES):
         try:
-            resp = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages, # type: ignore
-                max_tokens=MAX_TOKENS,
-                temperature=TEMPERATURE,
-            )
-            action = _parse_action_from_response(resp.choices[0].message.content or "", obs)
+            if client == "USE_HTTP":
+                text = _http_llm_call(messages)
+            else:
+                resp = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages, # type: ignore
+                    max_tokens=MAX_TOKENS,
+                    temperature=TEMPERATURE,
+                )
+                text = resp.choices[0].message.content or ""
+            
+            action = _parse_action_from_response(text, obs)
             if action: return action
         except Exception as e:
             logger.warning(f"LLM proxy attempt {attempt+1} failed: {e}")
