@@ -1,3 +1,12 @@
+---
+title: Customer Support Env
+emoji: 🎧
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # Customer Support Env
 
 OpenEnv-compatible customer support simulation for delivery, refund, technical, and escalation scenarios.
