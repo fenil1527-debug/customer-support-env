@@ -13,7 +13,9 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 
-sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
+stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+if callable(stdout_reconfigure):
+    stdout_reconfigure(encoding='utf-8', line_buffering=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stderr)
 logger = logging.getLogger("inference")
 
@@ -27,7 +29,7 @@ from server.app import Observation, Action
 
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/hf-inference/v1").rstrip("/")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY: str = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
+API_KEY: Optional[str] = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
 USE_LOCAL_ENV: bool = os.getenv("USE_LOCAL_ENV", "1") == "1"
 
 MAX_RETRIES: int = 3
@@ -129,19 +131,31 @@ def _heuristic_action(obs: Observation) -> Action:
         else:
             return Action(action_type="message_user", response="I apologize, please clear your cache and try in 5 minutes.")
 
+    elif obs.intent == "escalation":
+        if history_len == 0:
+            return Action(action_type="lookup_kb", target="policy_premium_return", response="Checking policy.")
+        elif history_len == 1:
+            order_id = "0000"
+            m = re.search(r"\d{5,6}", obs.user_query)
+            if m: order_id = m.group(0)
+            return Action(action_type="escalate_ticket", target=order_id, response="Escalating ticket.")
+        else:
+            return Action(action_type="message_user", response="I have escalated your ticket to my manager for review.")
+
     return Action(action_type="message_user", response="I am sorry you are experiencing this issue. We will work to fix it immediately.")
 
 SYSTEM_PROMPT = """You are an advanced Customer Support AI. You have access to internal systems.
 You MUST output a raw JSON object string to act. Schema:
 {
-  "action_type": "lookup_order" | "process_refund" | "lookup_kb" | "message_user",
-  "target": "order_id or kb_topic",
+  "action_type": "lookup_order" | "process_refund" | "lookup_kb" | "escalate_ticket" | "message_user",
+  "target": "id_or_topic",
   "response": "message to user or internal thought"
 }
 Available Actions:
 - 'lookup_order': Target is order_id. Returns status and tracking in JSON.
 - 'process_refund': Target is order_id. Processes a refund.
-- 'lookup_kb': Target is kb_topic (e.g., error_504). Returns knowledge base entry in JSON.
+- 'lookup_kb': Target is kb_topic. Returns knowledge base entry in JSON.
+- 'escalate_ticket': Target is order_id. Escalates strict cases to a manager.
 - 'message_user': No target. Final action to communicate with the user.
 Always respond with pure JSON."""
 
@@ -220,7 +234,7 @@ def run_episode(task_id: str, client, use_llm: bool, use_local: bool) -> float:
 
     if use_local:
         env = CustomerSupportEnv()
-        result_obj = env.reset()
+        result_obj = env.reset(task_id)
         obs = result_obj.observation
     else:
         result_dict = http_reset(task_id)
@@ -268,7 +282,7 @@ def main():
     parser.add_argument("--no-llm", action="store_true", default=False)
     args = parser.parse_args()
 
-    tasks_to_run = ["customer_issue_1", "customer_issue_2", "customer_issue_3"]
+    tasks_to_run = ["delivery", "refund", "technical", "escalation"]
     client = _build_client() if not args.no_llm else None
 
     for task_id in tasks_to_run:
