@@ -123,18 +123,21 @@ def _heuristic_action(obs: Observation) -> Action:
         
         tracking = "unknown"
         if obs.system_response:
-            m = re.search(r"TRK\d+", obs.system_response, re.IGNORECASE)
-            if m: tracking = m.group(0)
-            else:
-                m = re.search(r'"tracking":\s*"([^"]+)"', obs.system_response, re.IGNORECASE)
-                if m: tracking = m.group(1)
+            try:
+                system_data = json.loads(obs.system_response)
+                tracking = system_data.get("data", {}).get("tracking", "unknown")
+            except:
+                pass
         return Action(action_type="message_user", response=f"I apologize, your tracking is {tracking}. It has shipped.")
             
     elif obs.intent == "refund":
         if order_missing:
             return Action(action_type="message_user", response="Can you provide your order ID please?")
             
-        if not has_refund and not has_lookup:
+        if not has_lookup:
+            return Action(action_type="lookup_order", target=order_id, response="Checking order status.")
+            
+        if not has_refund:
             return Action(action_type="process_refund", target=order_id, response="Processing refund.")
         
         return Action(action_type="message_user", response="I apologize, I have processed your refund.")
@@ -162,6 +165,7 @@ def _heuristic_action(obs: Observation) -> Action:
 
     return Action(action_type="message_user", response="I am sorry you are experiencing this issue. We will work to fix it immediately.")
 
+
 SYSTEM_PROMPT = """You are an advanced Customer Support AI. You have access to internal systems.
 You MUST output a raw JSON object string to act. Schema:
 {
@@ -171,14 +175,14 @@ You MUST output a raw JSON object string to act. Schema:
 }
 Available Actions:
 - 'lookup_order': Target is order_id. Returns status and tracking in JSON.
-- 'process_refund': Target is order_id. Processes a refund.
+- 'process_refund': Target is order_id. Processes a refund. Check budget and eligibility!
 - 'lookup_kb': Target is kb_topic. Returns knowledge base entry in JSON.
 - 'escalate_ticket': Target is order_id. Escalates strict cases to a manager.
 - 'message_user': No target. Final action to communicate with the user.
 Always respond with pure JSON."""
 
 def _build_llm_prompt(obs: Observation) -> str:
-    return obs.user_query
+    return f"{obs.user_query} (Patience: {obs.patience}, Budget: {obs.budget})"
 
 def _parse_action_from_response(text: str, obs: Observation) -> Optional[Action]:
     try:
@@ -282,8 +286,6 @@ def run_episode(task_id: str, client, use_llm: bool, use_local: bool) -> float:
 
         action_clean = action.response.replace("\n", " ").replace("\r", "")[:120]
         log_step(step_num, action_clean, reward, done)
-
-        if step_num >= 5: done = True
 
 
     normalized_score = max(rewards_list) if rewards_list else 0.0
