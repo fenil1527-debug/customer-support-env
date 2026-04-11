@@ -113,7 +113,22 @@ class Env:
         score = grade_task(self.history, self.task)
 
         if act_type == "message_user":
-            self.task["query"] = "I have received your message. Please confirm the resolution."
+            user_msg = "I have received your message. Please confirm the resolution."
+            response_lower = response.lower()
+            if "order" in response_lower or "id" in response_lower:
+                if self.task.get("hidden_order_id"):
+                    user_msg = f"Oh sorry, my order ID is {self.task['hidden_order_id']}."
+                    self.task["hidden_order_id"] = None
+                else:
+                    user_msg = "I believe I already provided my order details."
+            elif "refund" in response_lower and "process" in response_lower:
+                user_msg = "Thank you for processing the refund."
+            elif "escalat" in response_lower or "manager" in response_lower:
+                user_msg = "Thank you, I will wait to hear from the manager."
+            elif "cache" in response_lower:
+                user_msg = "I cleared my cache, but let's assume it works now."
+                
+            self.task["query"] = user_msg
 
         done = self.step_count >= self.max_steps or score > 0.85
 

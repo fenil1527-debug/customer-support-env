@@ -10,17 +10,26 @@ def generate_delivery_task() -> dict:
     order_id = gen_id(5)
     tracking = "TRK" + gen_id(7)
     days = random.randint(3, 12)
-    templates = [
-        f"My order #{order_id} hasn't arrived. Where is it? It's been {days} days.",
-        f"Can you check on order {order_id}? Usually it's faster but it's been {days} days.",
-        f"I need the tracking for order_id {order_id}. Is it lost?"
-    ]
+    hide_id = random.choice([True, False])
+    if hide_id:
+        templates = [
+            f"My order hasn't arrived. Where is it? It's been {days} days.",
+            f"Can you check on my order? Usually it's faster but it's been {days} days.",
+            f"I need the tracking for my order. Is it lost?"
+        ]
+    else:
+        templates = [
+            f"My order #{order_id} hasn't arrived. Where is it? It's been {days} days.",
+            f"Can you check on order {order_id}? Usually it's faster but it's been {days} days.",
+            f"I need the tracking for order_id {order_id}. Is it lost?"
+        ]
     return {
         "id": f"delivery_issue_{uuid.uuid4().hex[:6]}",
         "query": random.choice(templates),
         "intent": "delivery",
         "priority": "high",
         "grader": "delivery_grader",
+        "hidden_order_id": order_id if hide_id else None,
         "system_db": {order_id: {"status": "shipped", "tracking": tracking}}
     }
 
@@ -28,17 +37,26 @@ def generate_refund_task() -> dict:
     order_id = gen_id(6)
     items = ["mug", "laptop sleeve", "phone case", "water bottle", "speaker"]
     item = random.choice(items)
-    templates = [
-        f"I received a broken {item}. Order #{order_id}. I want a refund.",
-        f"Refund me for the {item} from order {order_id}, it arrived damaged.",
-        f"Order {order_id} has a defective {item}. Is a refund possible?"
-    ]
+    hide_id = random.choice([True, False])
+    if hide_id:
+        templates = [
+            f"I received a broken {item}. I want a refund.",
+            f"Refund me for the {item}, it arrived damaged.",
+            f"My {item} is defective. Is a refund possible?"
+        ]
+    else:
+        templates = [
+            f"I received a broken {item}. Order #{order_id}. I want a refund.",
+            f"Refund me for the {item} from order {order_id}, it arrived damaged.",
+            f"Order {order_id} has a defective {item}. Is a refund possible?"
+        ]
     return {
         "id": f"refund_issue_{uuid.uuid4().hex[:6]}",
         "query": random.choice(templates),
         "intent": "refund",
         "priority": "high",
         "grader": "refund_grader",
+        "hidden_order_id": order_id if hide_id else None,
         "system_db": {order_id: {"item": item, "status": "delivered", "eligible": True}}
     }
 
@@ -61,16 +79,24 @@ def generate_technical_task() -> dict:
 
 def generate_escalation_task() -> dict:
     order_id = gen_id(6)
-    templates = [
-        f"Order #{order_id} was a premium laptop that broke after 40 days. Can I get a refund?",
-        f"I need to return my monitor from order {order_id}. It's been 45 days, but I have a premium warranty."
-    ]
+    hide_id = random.choice([True, False])
+    if hide_id:
+        templates = [
+            f"My premium laptop broke after 40 days. Can I get a refund?",
+            f"I need to return my monitor. It's been 45 days, but I have a premium warranty."
+        ]
+    else:
+        templates = [
+            f"Order #{order_id} was a premium laptop that broke after 40 days. Can I get a refund?",
+            f"I need to return my monitor from order {order_id}. It's been 45 days, but I have a premium warranty."
+        ]
     return {
         "id": f"escalation_issue_{uuid.uuid4().hex[:6]}",
         "query": random.choice(templates),
         "intent": "escalation",
         "priority": "high",
         "grader": "escalation_grader",
+        "hidden_order_id": order_id if hide_id else None,
         "system_db": {
             "policy_premium_return": "Premium returns >30 days require manager approval. Do NOT process_refund. Use escalate_ticket with the order_id.",
             order_id: {"item": "electronics", "status": "delivered", "days_since_purchase": 40 + random.randint(0, 10)}
