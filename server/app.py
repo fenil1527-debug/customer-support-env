@@ -2,13 +2,16 @@ from fastapi import FastAPI
 import json
 
 from pydantic import BaseModel
+from pydantic import Field
 from typing import List, Optional, Any, Dict
 
 class HistoryItem(BaseModel):
+    """Represents a single turn in the conversation between user and agent."""
     user: str
     agent: str
 
 class Observation(BaseModel):
+    """The state of the environment returned to the agent at each step."""
     user_query: str
     conversation_history: List[HistoryItem]
     step: int
@@ -19,6 +22,7 @@ class Observation(BaseModel):
     grader: str
 
 class Action(BaseModel):
+    """The action taken by the agent, representing either a tool call or a final message."""
     action_type: str = "message_user"
     target: Optional[str] = None
     response: str
@@ -33,7 +37,7 @@ class StepResult(BaseModel):
     observation: Observation
     reward: float
     done: bool
-    info: Dict[str, Any] = {}
+    info: Dict[str, Any] = Field(default_factory=dict)
 
 from server.tasks import get_task
 from server.graders import grade_task
@@ -48,9 +52,9 @@ class Env:
         self.task = None
         self.history = []
 
-    def reset(self):
+    def reset(self, task_id: Optional[str] = None):
         self.step_count = 0
-        self.task = get_task()
+        self.task = get_task(task_id)
         self.history = []
 
         return StepResult(
@@ -94,6 +98,12 @@ class Env:
                 system_response = json.dumps({"status": "success", "data": self.task['system_db'][target]})
             else:
                 system_response = json.dumps({"status": "error", "message": f"No KB entry found for {target}."})
+                
+        elif act_type == "escalate_ticket":
+            if target and str(target) in self.task.get("system_db", {}):
+                system_response = json.dumps({"status": "success", "message": f"Ticket escalated for {target}."})
+            else:
+                system_response = json.dumps({"status": "error", "message": f"Cannot escalate: invalid target {target}."})
 
         self.history.append({
             "user": self.task["query"],
@@ -136,8 +146,8 @@ env = Env()
 
 
 @app.post("/reset", response_model=StepResult)
-def reset():
-    return env.reset()
+def reset(task_id: Optional[str] = None):
+    return env.reset(task_id)
 
 
 @app.post("/step", response_model=StepResult)

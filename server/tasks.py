@@ -1,7 +1,7 @@
 import random
 import string
 import uuid
-from copy import deepcopy
+from typing import Callable, Dict, List, Optional
 
 def gen_id(length=5):
     return ''.join(random.choices(string.digits, k=length))
@@ -59,8 +59,71 @@ def generate_technical_task() -> dict:
         "system_db": {f"error_{error}": f"{error} Error. Instruct the user to clear their app cache and try again in 5 minutes."}
     }
 
-def get_task() -> dict:
-    task_types = [generate_delivery_task, generate_refund_task, generate_technical_task]
-    return random.choice(task_types)()
+def generate_escalation_task() -> dict:
+    order_id = gen_id(6)
+    templates = [
+        f"Order #{order_id} was a premium laptop that broke after 40 days. Can I get a refund?",
+        f"I need to return my monitor from order {order_id}. It's been 45 days, but I have a premium warranty."
+    ]
+    return {
+        "id": f"escalation_issue_{uuid.uuid4().hex[:6]}",
+        "query": random.choice(templates),
+        "intent": "escalation",
+        "priority": "high",
+        "grader": "escalation_grader",
+        "system_db": {
+            "policy_premium_return": "Premium returns >30 days require manager approval. Do NOT process_refund. Use escalate_ticket with the order_id.",
+            order_id: {"item": "electronics", "status": "delivered", "days_since_purchase": 40 + random.randint(0, 10)}
+        }
+    }
 
-TASKS = [] # Kept for potential legacy references, but get_task generates dynamically
+TASKS: List[Dict[str, str]] = [
+    {
+        "id": "delivery",
+        "intent": "delivery",
+        "priority": "high",
+        "grader": "delivery_grader",
+        "description": "Order tracking and delivery delay support",
+    },
+    {
+        "id": "refund",
+        "intent": "refund",
+        "priority": "high",
+        "grader": "refund_grader",
+        "description": "Refund handling for damaged or defective items",
+    },
+    {
+        "id": "technical",
+        "intent": "technical",
+        "priority": "medium",
+        "grader": "technical_grader",
+        "description": "App error troubleshooting and knowledge-base lookup",
+    },
+    {
+        "id": "escalation",
+        "intent": "escalation",
+        "priority": "high",
+        "grader": "escalation_grader",
+        "description": "Premium return escalation with manager approval",
+    },
+]
+
+_TASK_GENERATORS: Dict[str, Callable[[], dict]] = {
+    "delivery": generate_delivery_task,
+    "refund": generate_refund_task,
+    "technical": generate_technical_task,
+    "escalation": generate_escalation_task,
+}
+
+
+def get_task(task_id: Optional[str] = None) -> dict:
+    if task_id:
+        family = task_id.lower().strip()
+        if family in _TASK_GENERATORS:
+            return _TASK_GENERATORS[family]()
+        for key, generator in _TASK_GENERATORS.items():
+            if family.startswith(key):
+                return generator()
+
+    task_types = list(_TASK_GENERATORS.values())
+    return random.choice(task_types)()
