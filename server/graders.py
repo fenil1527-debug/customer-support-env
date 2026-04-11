@@ -11,10 +11,21 @@ def delivery_grader(history: list, task: dict) -> float:
     score = 0.05
     full_text = " ".join([h["agent"].lower() for h in history])
     
+    db_keys = list(task.get("system_db", {}).keys())
+    if not db_keys: return _clamp_strict(score)
+    order_id = db_keys[0]
+    tracking = task["system_db"][order_id]["tracking"].lower()
+    
     if "[lookup_order]" in full_text: 
         score += 0.35
-    if "trk992" in full_text or "shipped" in full_text:
+        if order_id not in full_text:
+            score -= 0.15
+
+    if tracking in full_text:
         score += 0.35
+    elif "trk" in full_text: 
+        score -= 0.20
+
     if any(w in full_text for w in ["sorry", "apologize", "understand"]):
         score += 0.15
     if "[message_user]" in full_text:
@@ -27,8 +38,14 @@ def refund_grader(history: list, task: dict) -> float:
     score = 0.05
     full_text = " ".join([h["agent"].lower() for h in history])
     
+    db_keys = list(task.get("system_db", {}).keys())
+    if not db_keys: return _clamp_strict(score)
+    order_id = db_keys[0]
+    
     if "[process_refund]" in full_text:
         score += 0.40
+        if order_id not in full_text:
+            score -= 0.20
     elif "[lookup_order]" in full_text:
         score += 0.20
         
@@ -46,9 +63,16 @@ def technical_grader(history: list, task: dict) -> float:
     score = 0.05
     full_text = " ".join([h["agent"].lower() for h in history])
     
+    db_keys = list(task.get("system_db", {}).keys())
+    if not db_keys: return _clamp_strict(score)
+    error_key = db_keys[0]
+    
     if "[lookup_kb]" in full_text:
         score += 0.35
-    if any(w in full_text for w in ["clear", "cache", "5", "minutes"]):
+        if error_key not in full_text and error_key.replace("error_", "") not in full_text:
+            score -= 0.15
+
+    if any(w in full_text for w in ["clear", "cache", "minutes"]):
         score += 0.35
     if any(w in full_text for w in ["apologize", "sorry"]):
         score += 0.10

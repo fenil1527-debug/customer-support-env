@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+import json
 
 from pydantic import BaseModel
 from typing import List, Optional, Any, Dict
@@ -78,25 +79,25 @@ class Env:
 
         if act_type == "lookup_order":
             if target and target in self.task.get("system_db", {}):
-                system_response = f"Order {target} found: {self.task['system_db'][target]}"
+                system_response = json.dumps({"status": "success", "data": self.task['system_db'][target]})
             else:
-                system_response = f"Order {target} not found."
+                system_response = json.dumps({"status": "error", "message": f"Order {target} not found."})
                 
         elif act_type == "process_refund":
             if target and target in self.task.get("system_db", {}):
-                system_response = f"Refund processed for {target}."
+                system_response = json.dumps({"status": "success", "message": f"Refund processed for {target}."})
             else:
-                system_response = f"Cannot process refund for {target}."
+                system_response = json.dumps({"status": "error", "message": f"Cannot process refund for {target}."})
                 
         elif act_type == "lookup_kb":
             if target and target in self.task.get("system_db", {}):
-                system_response = f"KB Entry: {self.task['system_db'][target]}"
+                system_response = json.dumps({"status": "success", "data": self.task['system_db'][target]})
             else:
-                system_response = f"No KB entry found for {target}."
+                system_response = json.dumps({"status": "error", "message": f"No KB entry found for {target}."})
 
         self.history.append({
             "user": self.task["query"],
-            "agent": f"[{act_type}] {response}"
+            "agent": f"[{act_type}] Target={target} | {response}" if target else f"[{act_type}] {response}"
         })
 
         score = grade_task(self.history, self.task)
