@@ -12,9 +12,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
-# ---------------------------------------------------------------------------
-# Global IO and Logging Initialization
-# ---------------------------------------------------------------------------
+
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stderr)
 logger = logging.getLogger("inference")
@@ -26,9 +24,7 @@ if _REPO_ROOT not in sys.path:
 from server.app import Env as CustomerSupportEnv
 from server.app import Observation, Action
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+
 API_BASE_URL: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/hf-inference/v1").rstrip("/")
 MODEL_NAME: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY: str = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
@@ -39,9 +35,7 @@ RETRY_DELAY: float = 1.0
 MAX_TOKENS: int = 150
 TEMPERATURE: float = 0.7
 
-# ===========================================================================
-# HTTP client helpers
-# ===========================================================================
+
 
 def _http(method: str, url: str, body: Optional[Dict] = None, timeout: int = 30) -> Dict:
     data = json.dumps(body).encode() if body is not None else None
@@ -63,9 +57,7 @@ def http_step(action: Action) -> Tuple[Dict, float, bool, Dict]:
     resp = _http("POST", f"{API_BASE_URL}/step", body=action.model_dump())
     return resp["observation"], resp["reward"], resp["done"], resp.get("info", {})
 
-# ===========================================================================
-# Helper / LLM Proxy Logic
-# ===========================================================================
+
 
 def observation_from_dict(d: Dict) -> Observation:
     return Observation(**d)
@@ -75,14 +67,14 @@ def _build_client():
     key = API_KEY or "no-key-set"
     logger.info("Initializing OpenAI client. Base: %s, Key set: %s", API_BASE_URL, bool(API_KEY))
     try:
-        # Strictly try instantiating the client
+
         return OpenAI(base_url=API_BASE_URL, api_key=key)
     except Exception as e:
         logger.warning(f"OpenAI package instantiation crashed: {e}. Falling back to pure HTTP proxy bypass.")
         return "USE_HTTP"
 
 def _http_llm_call(messages: List[Dict[str, str]]) -> str:
-    # Safely bypass openai library internally and hit proxy natively
+
     url = f"{API_BASE_URL}/chat/completions"
     headers = {
         "Authorization": f"Bearer {API_KEY or 'dummy'}",
@@ -105,19 +97,35 @@ def _heuristic_action(obs: Observation) -> Action:
     
     if obs.intent == "delivery":
         if history_len == 0:
-            return Action(action_type="lookup_order", target="5512", response="Let me check.")
+            order_id = "0000"
+            m = re.search(r"\d{5,6}", obs.user_query)
+            if m: order_id = m.group(0)
+            return Action(action_type="lookup_order", target=order_id, response="Let me check.")
         else:
-            return Action(action_type="message_user", response="I apologize, your tracking is TRK992. It has shipped.")
+            tracking = "unknown"
+            if obs.system_response:
+                m = re.search(r"TRK\d+", obs.system_response, re.IGNORECASE)
+                if m: tracking = m.group(0)
+                else:
+                    m = re.search(r'"tracking":\s*"([^"]+)"', obs.system_response, re.IGNORECASE)
+                    if m: tracking = m.group(1)
+            return Action(action_type="message_user", response=f"I apologize, your tracking is {tracking}. It has shipped.")
             
     elif obs.intent == "refund":
         if history_len == 0:
-            return Action(action_type="process_refund", target="8821", response="Processing refund.")
+            order_id = "0000"
+            m = re.search(r"\d{5,6}", obs.user_query)
+            if m: order_id = m.group(0)
+            return Action(action_type="process_refund", target=order_id, response="Processing refund.")
         else:
             return Action(action_type="message_user", response="I apologize, I have processed your refund.")
             
     elif obs.intent == "technical":
         if history_len == 0:
-            return Action(action_type="lookup_kb", target="error_504", response="Checking KB.")
+            error_code = "504"
+            m = re.search(r"error\s+(\d+)", obs.user_query, re.IGNORECASE)
+            if m: error_code = m.group(1)
+            return Action(action_type="lookup_kb", target=f"error_{error_code}", response="Checking KB.")
         else:
             return Action(action_type="message_user", response="I apologize, please clear your cache and try in 5 minutes.")
 
@@ -130,10 +138,12 @@ You MUST output a raw JSON object string to act. Schema:
   "target": "order_id or kb_topic",
   "response": "message to user or internal thought"
 }
-If the user asks about tracking, use 'lookup_order' with target order_id.
-If they need a refund, use 'process_refund'.
-If they have a technical error, use 'lookup_kb'.
-Always respond with JSON."""
+Available Actions:
+- 'lookup_order': Target is order_id. Returns status and tracking in JSON.
+- 'process_refund': Target is order_id. Processes a refund.
+- 'lookup_kb': Target is kb_topic (e.g., error_504). Returns knowledge base entry in JSON.
+- 'message_user': No target. Final action to communicate with the user.
+Always respond with pure JSON."""
 
 def _build_llm_prompt(obs: Observation) -> str:
     return obs.user_query
@@ -170,7 +180,7 @@ def get_action(client, obs: Observation, use_llm: bool = True) -> Action:
             else:
                 resp = client.chat.completions.create(
                     model=MODEL_NAME,
-                    messages=messages, # type: ignore
+                    messages=messages,
                     max_tokens=MAX_TOKENS,
                     temperature=TEMPERATURE,
                 )
@@ -184,9 +194,7 @@ def get_action(client, obs: Observation, use_llm: bool = True) -> Action:
 
     return _heuristic_action(obs)
 
-# ===========================================================================
-# STRUCTURED PLATFORM LOGGING
-# ===========================================================================
+
 
 def _clamp_score(val: float) -> float:
     epsilon = 0.01
@@ -204,9 +212,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     rewards_str = ",".join(f"{_clamp_score(r):.2f}" for r in rewards)
     print(f"[END] success={str(success).lower()} steps={steps} score={_clamp_score(score):.3f} rewards={rewards_str}", flush=True)
 
-# ===========================================================================
-# Episode Sequence
-# ===========================================================================
+
 
 def run_episode(task_id: str, client, use_llm: bool, use_local: bool) -> float:
     env_display = "local" if use_local else "remote"
@@ -247,16 +253,14 @@ def run_episode(task_id: str, client, use_llm: bool, use_local: bool) -> float:
 
         if step_num >= 5: done = True
 
-    # Do not penalize for solving the task efficiently in fewer steps
+
     normalized_score = max(rewards_list) if rewards_list else 0.0
     success = normalized_score >= 0.80
     
     log_end(success, step_num, normalized_score, rewards_list)
     return normalized_score
 
-# ===========================================================================
-# Main
-# ===========================================================================
+
 
 def main():
     parser = argparse.ArgumentParser()
