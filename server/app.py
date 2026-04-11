@@ -44,6 +44,14 @@ from server.graders import grade_task
 
 app = FastAPI()
 
+@app.get("/")
+def read_root():
+    return {
+        "status": "ok", 
+        "message": "Customer Support OpenEnv is running successfully.",
+        "docs": "Append /docs to the URL to interact with the API Swagger UI."
+    }
+
 
 class Env:
     def __init__(self):
