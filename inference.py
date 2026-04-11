@@ -95,52 +95,70 @@ def _http_llm_call(messages: List[Dict[str, str]]) -> str:
 
 
 def _heuristic_action(obs: Observation) -> Action:
-    history_len = len(obs.conversation_history)
+    order_id = "0000"
+    m = re.search(r"\d{5,6}", obs.user_query)
+    if m: 
+        order_id = m.group(0)
+    else:
+        for h in obs.conversation_history:
+            if "order" in h.agent.lower() and "id" in h.agent.lower():
+                m_hist = re.search(r"\d{5,6}", h.user)
+                if m_hist:
+                    order_id = m_hist.group(0)
+                    break
     
+    order_missing = order_id == "0000"
+
+    has_lookup = any("lookup_order" in h.agent for h in obs.conversation_history)
+    has_refund = any("process_refund" in h.agent for h in obs.conversation_history)
+    has_lookup_kb = any("lookup_kb" in h.agent for h in obs.conversation_history)
+    has_escalated = any("escalate_ticket" in h.agent for h in obs.conversation_history)
+
     if obs.intent == "delivery":
-        if history_len == 0:
-            order_id = "0000"
-            m = re.search(r"\d{5,6}", obs.user_query)
-            if m: order_id = m.group(0)
+        if order_missing:
+            return Action(action_type="message_user", response="Can you provide your order ID please?")
+        
+        if not has_lookup:
             return Action(action_type="lookup_order", target=order_id, response="Let me check.")
-        else:
-            tracking = "unknown"
-            if obs.system_response:
-                m = re.search(r"TRK\d+", obs.system_response, re.IGNORECASE)
-                if m: tracking = m.group(0)
-                else:
-                    m = re.search(r'"tracking":\s*"([^"]+)"', obs.system_response, re.IGNORECASE)
-                    if m: tracking = m.group(1)
-            return Action(action_type="message_user", response=f"I apologize, your tracking is {tracking}. It has shipped.")
+        
+        tracking = "unknown"
+        if obs.system_response:
+            m = re.search(r"TRK\d+", obs.system_response, re.IGNORECASE)
+            if m: tracking = m.group(0)
+            else:
+                m = re.search(r'"tracking":\s*"([^"]+)"', obs.system_response, re.IGNORECASE)
+                if m: tracking = m.group(1)
+        return Action(action_type="message_user", response=f"I apologize, your tracking is {tracking}. It has shipped.")
             
     elif obs.intent == "refund":
-        if history_len == 0:
-            order_id = "0000"
-            m = re.search(r"\d{5,6}", obs.user_query)
-            if m: order_id = m.group(0)
+        if order_missing:
+            return Action(action_type="message_user", response="Can you provide your order ID please?")
+            
+        if not has_refund and not has_lookup:
             return Action(action_type="process_refund", target=order_id, response="Processing refund.")
-        else:
-            return Action(action_type="message_user", response="I apologize, I have processed your refund.")
+        
+        return Action(action_type="message_user", response="I apologize, I have processed your refund.")
             
     elif obs.intent == "technical":
-        if history_len == 0:
+        if not has_lookup_kb:
             error_code = "504"
             m = re.search(r"error\s+(\d+)", obs.user_query, re.IGNORECASE)
             if m: error_code = m.group(1)
             return Action(action_type="lookup_kb", target=f"error_{error_code}", response="Checking KB.")
-        else:
-            return Action(action_type="message_user", response="I apologize, please clear your cache and try in 5 minutes.")
+            
+        return Action(action_type="message_user", response="I apologize, please clear your cache and try in 5 minutes.")
 
     elif obs.intent == "escalation":
-        if history_len == 0:
+        if order_missing:
+            return Action(action_type="message_user", response="Can you provide your order ID please?")
+            
+        if not has_lookup_kb:
             return Action(action_type="lookup_kb", target="policy_premium_return", response="Checking policy.")
-        elif history_len == 1:
-            order_id = "0000"
-            m = re.search(r"\d{5,6}", obs.user_query)
-            if m: order_id = m.group(0)
+            
+        if not has_escalated:
             return Action(action_type="escalate_ticket", target=order_id, response="Escalating ticket.")
-        else:
-            return Action(action_type="message_user", response="I have escalated your ticket to my manager for review.")
+            
+        return Action(action_type="message_user", response="I have escalated your ticket to my manager for review.")
 
     return Action(action_type="message_user", response="I am sorry you are experiencing this issue. We will work to fix it immediately.")
 
