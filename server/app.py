@@ -3,15 +3,13 @@ import json
 
 from pydantic import BaseModel
 from pydantic import Field
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Literal
 
 class HistoryItem(BaseModel):
-    """Represents a single turn in the conversation between user and agent."""
     user: str
     agent: str
 
 class Observation(BaseModel):
-    """The state of the environment returned to the agent at each step."""
     user_query: str
     conversation_history: List[HistoryItem]
     step: int
@@ -20,13 +18,13 @@ class Observation(BaseModel):
     intent: str
     task_id: str
     grader: str
+    patience: float
+    budget: float
 
 class Action(BaseModel):
-    """The action taken by the agent, representing either a tool call or a final message."""
-    action_type: str = "message_user"
+    action_type: Literal["lookup_order", "process_refund", "lookup_kb", "escalate_ticket", "message_user"] = "message_user"
     target: Optional[str] = None
     response: str
-
 
 class State(BaseModel):
     step: int
@@ -52,11 +50,10 @@ def read_root():
         "docs": "Append /docs to the URL to interact with the API Swagger UI."
     }
 
-
 class Env:
     def __init__(self):
         self.step_count = 0
-        self.max_steps = 5
+        self.max_steps = 7
         self.task = None
         self.history = []
 
@@ -75,6 +72,8 @@ class Env:
                 intent=self.task["intent"],
                 task_id=self.task["id"],
                 grader=self.task["grader"],
+                patience=self.task["patience"],
+                budget=self.task["budget"],
             ),
             reward=0.01,
             done=False,
@@ -94,31 +93,48 @@ class Env:
                 system_response = json.dumps({"status": "success", "data": self.task['system_db'][target]})
             else:
                 system_response = json.dumps({"status": "error", "message": f"Order {target} not found."})
+                self.task["patience"] -= 0.1
                 
         elif act_type == "process_refund":
             if target and target in self.task.get("system_db", {}):
-                system_response = json.dumps({"status": "success", "message": f"Refund processed for {target}."})
+                order_data = self.task['system_db'][target]
+                if order_data.get("status") == "refunded":
+                    system_response = json.dumps({"status": "error", "message": "Already refunded."})
+                    self.task["patience"] -= 0.1
+                elif "cost" in order_data and self.task["budget"] < order_data["cost"]:
+                    system_response = json.dumps({"status": "error", "message": "Insufficient daily budget to process."})
+                    self.task["patience"] -= 0.1
+                elif order_data.get("eligible") == False:
+                    system_response = json.dumps({"status": "error", "message": "Item is not eligible for refund."})
+                    self.task["patience"] -= 0.2
+                else:
+                    cost = order_data.get("cost", 0.0)
+                    self.task["budget"] -= cost
+                    self.task['system_db'][target]["status"] = "refunded"
+                    system_response = json.dumps({"status": "success", "message": f"Refund processed. ${cost} deducted."})
             else:
                 system_response = json.dumps({"status": "error", "message": f"Cannot process refund for {target}."})
+                self.task["patience"] -= 0.1
                 
         elif act_type == "lookup_kb":
             if target and target in self.task.get("system_db", {}):
                 system_response = json.dumps({"status": "success", "data": self.task['system_db'][target]})
             else:
                 system_response = json.dumps({"status": "error", "message": f"No KB entry found for {target}."})
+                self.task["patience"] -= 0.1
                 
         elif act_type == "escalate_ticket":
             if target and str(target) in self.task.get("system_db", {}):
+                self.task['system_db'][target]["escalated"] = True
                 system_response = json.dumps({"status": "success", "message": f"Ticket escalated for {target}."})
             else:
                 system_response = json.dumps({"status": "error", "message": f"Cannot escalate: invalid target {target}."})
+                self.task["patience"] -= 0.1
 
         self.history.append({
             "user": self.task["query"],
             "agent": f"[{act_type}] Target={target} | {response}" if target else f"[{act_type}] {response}"
         })
-
-        score = grade_task(self.history, self.task)
 
         if act_type == "message_user":
             user_msg = "I have received your message. Please confirm the resolution."
@@ -129,16 +145,28 @@ class Env:
                     self.task["hidden_order_id"] = None
                 else:
                     user_msg = "I believe I already provided my order details."
+                    self.task["patience"] -= 0.2  # annoying
             elif "refund" in response_lower and "process" in response_lower:
                 user_msg = "Thank you for processing the refund."
             elif "escalat" in response_lower or "manager" in response_lower:
                 user_msg = "Thank you, I will wait to hear from the manager."
             elif "cache" in response_lower:
                 user_msg = "I cleared my cache, but let's assume it works now."
-                
+            else:
+                self.task["patience"] -= 0.05
             self.task["query"] = user_msg
 
-        done = self.step_count >= self.max_steps or score > 0.85
+        self.task["patience"] = max(0.0, round(self.task["patience"], 2))
+        self.task["budget"] = round(self.task["budget"], 2)
+
+        score = grade_task(self.history, self.task)
+        
+        # Patience burnout ends the episode in failure
+        if self.task["patience"] <= 0.0:
+            score = 0.0
+            done = True
+        else:
+            done = self.step_count >= self.max_steps or score > 0.85
 
         return StepResult(
             observation=Observation(
@@ -150,6 +178,8 @@ class Env:
                 intent=self.task["intent"],
                 task_id=self.task["id"],
                 grader=self.task["grader"],
+                patience=self.task["patience"],
+                budget=self.task["budget"],
             ),
             reward=score,
             done=done,
@@ -164,29 +194,23 @@ class Env:
             task_id=self.task["id"],
         )
 
-
 env = Env()
-
 
 @app.post("/reset", response_model=StepResult)
 def reset(task_id: Optional[str] = None):
     return env.reset(task_id)
 
-
 @app.post("/step", response_model=StepResult)
 def step(action: Action):
     return env.step(action.model_dump())
-
 
 @app.get("/state", response_model=State)
 def state():
     return env.state()
 
-
 def main():
     import uvicorn
     uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
-
 
 if __name__ == "__main__":
     main()

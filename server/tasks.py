@@ -30,6 +30,8 @@ def generate_delivery_task() -> dict:
         "priority": "high",
         "grader": "delivery_grader",
         "hidden_order_id": order_id if hide_id else None,
+        "patience": 1.0,
+        "budget": 500.0,
         "system_db": {order_id: {"status": "shipped", "tracking": tracking}}
     }
 
@@ -38,6 +40,7 @@ def generate_refund_task() -> dict:
     items = ["mug", "laptop sleeve", "phone case", "water bottle", "speaker"]
     item = random.choice(items)
     hide_id = random.choice([True, False])
+    cost = round(random.uniform(20.0, 150.0), 2)
     if hide_id:
         templates = [
             f"I received a broken {item}. I want a refund.",
@@ -57,7 +60,9 @@ def generate_refund_task() -> dict:
         "priority": "high",
         "grader": "refund_grader",
         "hidden_order_id": order_id if hide_id else None,
-        "system_db": {order_id: {"item": item, "status": "delivered", "eligible": True}}
+        "patience": 1.0,
+        "budget": 500.0,
+        "system_db": {order_id: {"item": item, "status": "delivered", "eligible": True, "cost": cost}}
     }
 
 def generate_technical_task() -> dict:
@@ -74,7 +79,9 @@ def generate_technical_task() -> dict:
         "intent": "technical",
         "priority": "medium",
         "grader": "technical_grader",
-        "system_db": {f"error_{error}": f"{error} Error. Instruct the user to clear their app cache and try again in 5 minutes."}
+        "patience": 1.0,
+        "budget": 500.0,
+        "system_db": {f"error_{error}": {"type": "kb_entry", "content": f"{error} Error. Instruct the user to clear their app cache and try again in 5 minutes."}}
     }
 
 def generate_escalation_task() -> dict:
@@ -97,42 +104,13 @@ def generate_escalation_task() -> dict:
         "priority": "high",
         "grader": "escalation_grader",
         "hidden_order_id": order_id if hide_id else None,
+        "patience": 1.0,
+        "budget": 500.0,
         "system_db": {
-            "policy_premium_return": "Premium returns >30 days require manager approval. Do NOT process_refund. Use escalate_ticket with the order_id.",
-            order_id: {"item": "electronics", "status": "delivered", "days_since_purchase": 40 + random.randint(0, 10)}
+            "policy_premium_return": {"type": "kb_entry", "content": "Premium returns >30 days require manager approval. Do NOT process_refund. Use escalate_ticket with the order_id."},
+            order_id: {"item": "electronics", "status": "delivered", "days_since_purchase": 40 + random.randint(0, 10), "eligible": False, "requires_escalation": True}
         }
     }
-
-TASKS: List[Dict[str, str]] = [
-    {
-        "id": "delivery",
-        "intent": "delivery",
-        "priority": "high",
-        "grader": "delivery_grader",
-        "description": "Order tracking and delivery delay support",
-    },
-    {
-        "id": "refund",
-        "intent": "refund",
-        "priority": "high",
-        "grader": "refund_grader",
-        "description": "Refund handling for damaged or defective items",
-    },
-    {
-        "id": "technical",
-        "intent": "technical",
-        "priority": "medium",
-        "grader": "technical_grader",
-        "description": "App error troubleshooting and knowledge-base lookup",
-    },
-    {
-        "id": "escalation",
-        "intent": "escalation",
-        "priority": "high",
-        "grader": "escalation_grader",
-        "description": "Premium return escalation with manager approval",
-    },
-]
 
 _TASK_GENERATORS: Dict[str, Callable[[], dict]] = {
     "delivery": generate_delivery_task,
@@ -140,7 +118,6 @@ _TASK_GENERATORS: Dict[str, Callable[[], dict]] = {
     "technical": generate_technical_task,
     "escalation": generate_escalation_task,
 }
-
 
 def get_task(task_id: Optional[str] = None) -> dict:
     if task_id:

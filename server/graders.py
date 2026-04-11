@@ -1,4 +1,6 @@
-def _clamp_strict(score: float) -> float:
+def _clamp_strict(score: float, patience: float) -> float:
+    # Blend the score heavily with patience. If patience is low, reward drops exponentially.
+    score = score * (patience ** 1.5)
     score = round(float(score), 4)
     if score <= 0.0:
         score = 0.01
@@ -8,174 +10,87 @@ def _clamp_strict(score: float) -> float:
 
 def delivery_grader(history: list, task: dict) -> float:
     score = 0.05
+    patience = task.get("patience", 1.0)
     db_keys = list(task.get("system_db", {}).keys())
-    if not db_keys: return _clamp_strict(score)
+    if not db_keys: return _clamp_strict(score, patience)
     order_id = db_keys[0]
-    tracking = task["system_db"][order_id]["tracking"].lower()
     
     actions = [h.get("agent", "").lower() for h in history]
-    
-    has_lookup = False
-    has_messaged = False
-    hallucinated = False
-    revealed_id = False
-    hidden_id = task.get("hidden_order_id")
-    
-    for action in actions:
-        if "message_user" in action and ("order" in action or "id" in action):
-            revealed_id = True
-            
-        if "lookup_order" in action:
-            if order_id in action:
-                has_lookup = True
-                if hidden_id == order_id and not revealed_id:
-                    hallucinated = True
-            else:
-                score -= 0.15
-        if "message_user" in action:
-            has_messaged = True
-
-    if has_lookup:
-        score += 0.35
-    if hallucinated:
-        score -= 0.40  # Heavy penalty for hallucinating the hidden order ID
-        
     full_text = " ".join(actions)
-    if tracking in full_text:
-        score += 0.35
+    
+    tracking_info = task["system_db"][order_id].get("tracking", "")
+    if tracking_info and tracking_info.lower() in full_text:
+        score += 0.80
     elif "trk" in full_text:
         score -= 0.20
 
     if any(w in full_text for w in ["sorry", "apologize", "understand"]):
         score += 0.15
-    if has_messaged:
-        score += 0.09
-    if "ship" in full_text:
-        score += 0.05
         
-    return _clamp_strict(score)
+    return _clamp_strict(score, patience)
 
 def refund_grader(history: list, task: dict) -> float:
     score = 0.05
+    patience = task.get("patience", 1.0)
     db_keys = list(task.get("system_db", {}).keys())
-    if not db_keys: return _clamp_strict(score)
+    if not db_keys: return _clamp_strict(score, patience)
     order_id = db_keys[0]
     
-    actions = [h.get("agent", "").lower() for h in history]
+    order_obj = task["system_db"][order_id]
     
-    has_refund = False
-    has_lookup = False
-    hallucinated = False
-    revealed_id = False
-    hidden_id = task.get("hidden_order_id")
-
-    for action in actions:
-        if "message_user" in action and ("order" in action or "id" in action):
-            revealed_id = True
-            
-        if "process_refund" in action:
-            if order_id in action:
-                has_refund = True
-                if hidden_id == order_id and not revealed_id:
-                    hallucinated = True
-            else:
-                score -= 0.20
-        elif "lookup_order" in action:
-            has_lookup = True
-            
-    if has_refund:
-        score += 0.40
-    if has_lookup:
-        score += 0.20
-    if hallucinated:
-        score -= 0.40
-        
+    # Mathematically check final state
+    if order_obj.get("status") == "refunded":
+        score += 0.85
+    
+    actions = [h.get("agent", "").lower() for h in history]
     full_text = " ".join(actions)
-    if any(w in full_text for w in ["refund", "process", "done", "complete"]):
-        score += 0.30
     if any(w in full_text for w in ["sorry", "apologize", "understand"]):
         score += 0.10
-    if "[message_user]" in full_text:
-        score += 0.10
-    if "eligible" in str(task.get("system_db", {})).lower():
-        score += 0.05
         
-    return _clamp_strict(score)
+    return _clamp_strict(score, patience)
 
 def technical_grader(history: list, task: dict) -> float:
     score = 0.05
-    db_keys = list(task.get("system_db", {}).keys())
-    if not db_keys: return _clamp_strict(score)
-    error_key = db_keys[0]
+    patience = task.get("patience", 1.0)
     
     actions = [h.get("agent", "").lower() for h in history]
     full_text = " ".join(actions)
     
     if "[lookup_kb]" in full_text:
-        score += 0.35
-        if error_key not in full_text and error_key.replace("error_", "") not in full_text:
-            score -= 0.15
+        score += 0.45
 
     if any(w in full_text for w in ["clear", "cache", "minutes"]):
-        score += 0.35
+        score += 0.40
     if any(w in full_text for w in ["apologize", "sorry"]):
         score += 0.10
-    if "[message_user]" in full_text:
-        score += 0.10
-    if "cache" in full_text and "minutes" in full_text:
-        score += 0.05
         
-    return _clamp_strict(score)
+    return _clamp_strict(score, patience)
 
 def escalation_grader(history: list, task: dict) -> float:
     score = 0.05
-    db_keys = list(task.get("system_db", {}).keys())
-    if not db_keys: return _clamp_strict(score)
+    patience = task.get("patience", 1.0)
+    db_keys = [k for k in task.get("system_db", {}).keys() if k.isdigit()]
+    if not db_keys: return _clamp_strict(score, patience)
     
-    order_id = [k for k in db_keys if k.isdigit()][0]
-
-    actions = [h.get("agent", "").lower() for h in history]
+    order_id = db_keys[0]
+    order_obj = task["system_db"][order_id]
     
-    has_lookup_kb = False
-    has_escalated = False
-    hallucinated = False
-    revealed_id = False
-    hidden_id = task.get("hidden_order_id")
-
-    for action in actions:
-        if "message_user" in action and ("order" in action or "id" in action):
-            revealed_id = True
-            
-        if "lookup_kb" in action and "policy" in action:
-            has_lookup_kb = True
-            
-        if "escalate_ticket" in action:
-            if order_id in action:
-                has_escalated = True
-                if hidden_id == order_id and not revealed_id:
-                    hallucinated = True
-            else:
-                score -= 0.15
+    if order_obj.get("escalated") == True:
+        score += 0.75
         
-        if "process_refund" in action:
-            score -= 0.30
-
-    if has_lookup_kb:
-        score += 0.25
-    if has_escalated:
-        score += 0.40
-    if hallucinated:
-        score -= 0.40
-
+    actions = [h.get("agent", "").lower() for h in history]
     full_text = " ".join(actions)
-    if any(w in full_text for w in ["escalate", "manager", "review", "team"]):
-        score += 0.20
-    if "premium" in str(task.get("system_db", {})).lower():
-        score += 0.05
-    if "[message_user]" in full_text:
+    
+    if "process_refund" in full_text:
+        score -= 0.50 # Penalty for refunding when not eligible
+        
+    if "[lookup_kb]" in full_text:
         score += 0.10
         
-    return _clamp_strict(score)
+    if any(w in full_text for w in ["apologize", "sorry", "escalate", "manager"]):
+        score += 0.10
+        
+    return _clamp_strict(score, patience)
 
 GRADERS = {
     "delivery_grader":  delivery_grader,
